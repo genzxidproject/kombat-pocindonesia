@@ -1,0 +1,70 @@
+name: Build Rebranded APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Download Apktool
+        run: |
+          mkdir -p bin
+          curl -sL https://bitbucket.org/iBotPeaches/apktool/downloads/apktool_2.9.3.jar -o bin/apktool.jar
+
+      - name: Build APK with Apktool
+        run: |
+          java -jar bin/apktool.jar b . -o app-unsigned.apk
+
+      - name: Align & Sign APK
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y zipalign apksigner
+
+          # Align
+          zipalign -p -f -v 4 app-unsigned.apk app-aligned.apk
+
+          # Generate temporary release keystore
+          keytool -genkeypair -v -keystore release.jks -alias poc_release -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "pocindonesia123" -keypass "pocindonesia123" \
+            -dname "CN=POC INDONESIA, OU=Dev, O=POC INDONESIA, L=Samarinda, ST=Kaltim, C=ID"
+
+          # Sign
+          apksigner sign --ks release.jks --ks-pass pass:pocindonesia123 --ks-key-alias poc_release --key-pass pass:pocindonesia123 \
+            --out POC-INDONESIA-v1.0.apk app-aligned.apk
+
+          # Verify signature
+          apksigner verify -v POC-INDONESIA-v1.0.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: POC-INDONESIA-Release-APK
+          path: POC-INDONESIA-v1.0.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        with:
+          tag_name: v1.0-build-${{ github.run_number }}
+          name: POC INDONESIA Radio PTT v1.0 (Build ${{ github.run_number }})
+          body: |
+            Release build otomatis POC INDONESIA PTT Client.
+            - Server Utama: `ptt.pocindonesia.web.id:9987`
+            - Server Alternatif: `ptt.pockaltim.com:9987`
+            - Brand: POC INDONESIA
+          files: POC-INDONESIA-v1.0.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
